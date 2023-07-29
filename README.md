@@ -14,4 +14,4 @@ A project creating a custom hot plate to aid in the process of making PCB using 
 
 - Solid State Relay - 40 DC
 
-- PT100 - Temperature sensor 
+- PT100 - RTD Temperature Sensor 
