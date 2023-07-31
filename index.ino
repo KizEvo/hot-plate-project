@@ -2,6 +2,7 @@
 const byte INT_PIN {2};
 const byte ENA_PIN {11};
 const byte RS_PIN {12};
+const byte SSR_PIN {13};
 // Device states
 volatile byte mode {0};
 volatile bool isUserPressedFinish {false};
@@ -41,7 +42,7 @@ Timer autoModeTim;
 
 void writeLCD(char val, bool isWrite = false){
   char temp {val};
-  for(int port {3}; port <= 10; port++){
+  for(byte port {3}; port <= 10; port++){
     temp = val & 0x1;
     val = val >> 1;
     digitalWrite(port, temp == 1 ? HIGH : LOW);
@@ -86,13 +87,13 @@ void writeIntLCD(int num){
 }
 
 void moveCursorRightLCD(int line){
-  for(int i {0}; i < line; i++){
+  for(byte i {0}; i < line; i++){
     writeLCD(0x14);
   }
 }
 
 void moveCursorLeftLCD(int line){
-  for(int i {0}; i < line; i++){
+  for(byte i {0}; i < line; i++){
     writeLCD(0x10);
   }
 }
@@ -116,21 +117,21 @@ void initProgram(){
   moveCursorRightLCD(4);
   writeStringLCD("Loading");
   writeLCD(0xC0);           // set cursor to second line
-  for(int i {0}; i < 8; i++){
+  for(byte i {0}; i < 8; i++){
     writeLCD('#', true);
-    delay(750 + i * 50);
+    delay(600 + i * 50);
   }
   
   writeLCD(0x80);           // set cursor to first line
   writeStringLCD("Fetching Command");
   writeLCD(0xC7);
-  for(int i {0}; i < 8; i++){
+  for(byte i {0}; i < 8; i++){
     writeLCD('#', true);
     delay(500 + i * 30);
   }
   
   writeLCD(0x01);           // clear display
-  for(int i {0}; i < 32; i++){
+  for(byte i {0}; i < 32; i++){
     if(i < 16) writeLCD('>', true);
     else {
       if(i == 16) {
@@ -166,7 +167,7 @@ void initProgram(){
   writeLCD(0x01);
   moveCursorRightLCD(3);
   writeStringLCD("Temp:");
-  writeLCD(0x8B);           // set cursor to address 0x0B - first line - 8 is prefix for "set DDRAM" instruction
+  writeLCD(0x8C);           // set cursor to address 0x0B - first line - 8 is prefix for "set DDRAM" instruction
   writeLCD(0xDF, true);     // special character * in kanji
   writeLCD('C', true);
 
@@ -176,8 +177,9 @@ void initProgram(){
     writeStringLCD("Mode:Auto");
   } else {
     writeLCD(0xC0);         // set cursor to second line
-    moveCursorRightLCD(3);
     writeStringLCD("Mode:Norm");
+    moveCursorRightLCD(1);
+    writeStringLCD("Mx:");
   }
 }
 
@@ -186,12 +188,9 @@ void setup() {
   for(byte i {3}; i <= 12; i++){
     pinMode(i, OUTPUT);
   }
-  // INPUT to drive SSR
-  pinMode(A0, INPUT);
-  // OUTPUT to switch SSR
-  pinMode(A1, OUTPUT);
-  pinMode(A2, OUTPUT);
-  analogWrite(A1, 255);
+  // OUTPUT to drive SSR
+  pinMode(SSR_PIN, OUTPUT);
+  digitalWrite(SSR_PIN, LOW);
   // INPUT - interrupt
   pinMode(INT_PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(INT_PIN), setAutoMode, FALLING);
@@ -219,27 +218,41 @@ void loop() {
 }
 
 void doAutoMode(){
-  
+  writeLCD(0x88);
+  writeIntLCD((getSensorVoltage() * 1024.0 / 1.1));
+  if(((getSensorVoltage() * 1024.0 / 1.1, 4) / 10) < 10) writeLCD(' ', true);
+  delay(200);
 }
 
-void doNormalMode(){ 
-  if(normModeTim.checkFinished() && (getTemperature() <= normTempLimit)){
-    normModeTim.setCounter(9900);
-    if(normTempLimit - getTemperature() <= 5) normTempLimit += 2;
-    if(normTempLimit >= 180) isNormTempOverheat = true;
-    else if((getTemperature() < 50) && isNormTempOverheat) isNormTempOverheat = false; 
-    delay(100);
-    Serial.println(normTempLimit);
-  }
+void doNormalMode(){
+  int temperature{};
+  int tempLimit{};
   
-  if(getTemperature() > normTempLimit) analogWrite(A1, 0);
-  else analogWrite(A1, 255);
-  
-  writeLCD(0x88);
-  writeIntLCD(getTemperature());
-  if((getTemperature() / 10) < 10) writeLCD(' ', true);
+  while(!isUserPressedFinish){
+    delay(200);
+    temperature = getTemperature();
+    tempLimit = getTempLimit();
 
-  delay(200);
+    if(temperature <= tempLimit) digitalWrite(SSR_PIN, HIGH);
+    else digitalWrite(SSR_PIN, LOW);
+    
+    writeLCD(0x88);
+    writeIntLCD(temperature);
+    if((temperature / 10) < 10) writeLCD(' ', true);
+    
+    writeLCD(0xC0);
+    moveCursorRightLCD(13);
+    writeIntLCD(tempLimit);
+    if((tempLimit / 10) < 10) writeLCD(' ', true);
+  }
+
+  writeLCD(0x01);           // clear display
+  writeStringLCD("Program closed");
+  writeLCD(0xC0);
+  writeStringLCD("See you again!");
+  // turn off SSR
+  digitalWrite(SSR_PIN, LOW);
+  while(1);
 }
 
 char convertIntDigitToChar(int digit){
@@ -255,12 +268,21 @@ char convertIntDigitToChar(int digit){
 }
 
 float getSensorVoltage(){
+//  float amplifiedSensorVoltage = (analogRead(A0)) * 1.1 / 1024.0;
+//  return (amplifiedSensorVoltage * 1000.0) / (4700.0 + 1000.0); 
   return (analogRead(A0)) * 1.1 / 1024.0;
 }
 
 float getTemperature(){
-  float sensorResistance = (getSensorVoltage() * 10000.0) / (5.0 - getSensorVoltage());
+//  float sensorVoltage = getSensorVoltage();
+//  float sensorResistance = (sensorVoltage * 4700.0) / (5.0 - sensorVoltage);
+//  return static_cast<int>((sensorResistance - 100.0) / 0.4); 
+  float sensorResistance = (getSensorVoltage() * 1000.0) / (5.0 - getSensorVoltage());
   return static_cast<int>((sensorResistance - 100.0) / 0.4);
+}
+
+int getTempLimit(){
+  return static_cast<int>(analogRead(A1) * 255.0 / 1024.0);
 }
 
 void setAutoMode() {
