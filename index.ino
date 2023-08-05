@@ -3,6 +3,7 @@ const byte INT_PIN {2};
 const byte ENA_PIN {11};
 const byte RS_PIN {12};
 const byte SSR_PIN {13};
+const short unsigned int MAX_SAMPLE{512};
 // Device states
 volatile byte mode {0};
 volatile bool isUserPressedFinish {false};
@@ -11,9 +12,7 @@ bool isFinishedInitProgram {false};
 // LCD Instruction
 
 // Global vars
-int normPrevTemp {0};
-int isNormTempOverheat {false};
-int normTempLimit {40};
+int normPrevTempLimit;
 
 class Timer
 {
@@ -159,7 +158,7 @@ void initProgram(){
   writeLCD(0xC0);
   writeStringLCD("Auto - Norm");
   // Waiting for user - mode selection (auto/normal)
-  Timer initTim{10000};
+  Timer initTim{5000};
   while(!initTim.checkFinished()){
     if(mode == 1) break;
   }
@@ -173,8 +172,10 @@ void initProgram(){
 
   if(mode == 1){
     writeLCD(0xC0);         // set cursor to second line
-    moveCursorRightLCD(3);
+    moveCursorRightLCD(1);
     writeStringLCD("Mode:Auto");
+    moveCursorRightLCD(1);
+    writeStringLCD("T:");
   } else {
     writeLCD(0xC0);         // set cursor to second line
     writeStringLCD("Mode:Norm");
@@ -196,20 +197,14 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(INT_PIN), setAutoMode, FALLING);
   // ADC - 1.1 Vref
   analogReference(INTERNAL);
-  // Testing - will be deleted
-  Serial.begin(9600);
   // Init LCD instructions
   initLCD();
   // Init program - text placement
   initProgram();
   // Set program operating state flags to true
   isRunning = true;
-  // Turn on TIM based on mode selection
-  if(mode == 1){
-    autoModeTim.setCounter(1000);
-  } else {
-    normModeTim.setCounter(15000);
-  }
+  // Testing - will be deleted
+  Serial.begin(9600);
 }
 
 void loop() {
@@ -218,32 +213,49 @@ void loop() {
 }
 
 void doAutoMode(){
-  writeLCD(0x88);
-  writeIntLCD((getSensorVoltage() * 1024.0 / 1.1));
-  if(((getSensorVoltage() * 1024.0 / 1.1, 4) / 10) < 10) writeLCD(' ', true);
-  delay(200);
-}
-
-void doNormalMode(){
-  int temperature{};
-  int tempLimit{};
+  const byte MAX_TEMP_STAGES[3] {105, 165, 200};
+  byte currStage {0};
+  bool stageFlag {true};
   
-  while(!isUserPressedFinish){
-    delay(200);
-    temperature = getTemperature();
-    tempLimit = getTempLimit();
+  float temperature{};
+  float tempSample{0};
+  int totalSample{0};
 
-    if(temperature <= tempLimit) digitalWrite(SSR_PIN, HIGH);
-    else digitalWrite(SSR_PIN, LOW);
+  float prevHighestTemp{0};
+  unsigned long timeRef = millis();
+
+  while(!isUserPressedFinish){
+    temperature = getTemperature();
+    tempSample += temperature * temperature;
+    totalSample++;
+    
+    if(totalSample < MAX_SAMPLE) continue;
+    float avgTemp = sqrt(tempSample / totalSample);
+    totalSample = 0;
+    tempSample = 0;
+
+    if(!stageFlag && prevHighestTemp - 1 > avgTemp && currStage < 3){
+      currStage++;
+      stageFlag = true;
+    }
+
+    if(avgTemp <= MAX_TEMP_STAGES[currStage] && stageFlag)
+      digitalWrite(SSR_PIN, HIGH);
+    else {
+      stageFlag = false;
+      digitalWrite(SSR_PIN, LOW);
+    }
+
+    if(avgTemp > prevHighestTemp) prevHighestTemp = avgTemp;
     
     writeLCD(0x88);
-    writeIntLCD(temperature);
-    if((temperature / 10) < 10) writeLCD(' ', true);
-    
+    writeIntLCD(static_cast<int>(avgTemp));
+    if((avgTemp / 10) < 10) writeLCD(' ', true);
+
     writeLCD(0xC0);
     moveCursorRightLCD(13);
-    writeIntLCD(tempLimit);
-    if((tempLimit / 10) < 10) writeLCD(' ', true);
+    writeIntLCD(static_cast<int>((millis() - timeRef) / 1000));
+    if((static_cast<int>((millis() - timeRef) / 1000) / 10) < 10) writeLCD(' ', true);
   }
 
   writeLCD(0x01);           // clear display
@@ -254,6 +266,59 @@ void doNormalMode(){
   digitalWrite(SSR_PIN, LOW);
   while(1);
 }
+
+void doNormalMode(){
+  float temperature{};
+  float tempLimit{};
+  float tempSample{0};
+  float tempSampleLim{0};
+  int totalSample{0};
+
+  while(!isUserPressedFinish){
+    temperature = getTemperature();
+    tempLimit = getTempLimit();
+
+    tempSample += temperature * temperature;
+    tempSampleLim += tempLimit * tempLimit;
+    totalSample++;
+
+    if(totalSample < MAX_SAMPLE) continue;
+
+    float avgTemp = sqrt(tempSample / totalSample);
+    float avgTempLimit = sqrt(tempSampleLim / totalSample);
+    
+    totalSample = 0;
+    tempSample = 0;
+    tempSampleLim = 0;
+    
+    if(avgTemp <= avgTempLimit 
+          && normPrevTempLimit == static_cast<int>(avgTempLimit)) 
+              digitalWrite(SSR_PIN, HIGH);
+    else digitalWrite(SSR_PIN, LOW);
+
+    normPrevTempLimit = static_cast<int>(avgTempLimit);
+    
+    writeLCD(0x88);
+    writeIntLCD(static_cast<int>(avgTemp));
+    if((avgTemp / 10) < 10) writeLCD(' ', true);
+    
+    writeLCD(0xC0);
+    moveCursorRightLCD(13);
+    avgTempLimit = avgTempLimit < 1.0 ? 1.0 : avgTempLimit;
+    writeIntLCD(static_cast<int>(avgTempLimit));
+    if((avgTempLimit / 10) < 10) writeLCD(' ', true);
+  }
+
+  writeLCD(0x01);           // clear display
+  writeStringLCD("Program closed");
+  writeLCD(0xC0);
+  writeStringLCD("See you again!");
+  // turn off SSR
+  digitalWrite(SSR_PIN, LOW);
+  while(1);
+}
+
+
 
 char convertIntDigitToChar(int digit){
   byte count {0};
@@ -268,21 +333,16 @@ char convertIntDigitToChar(int digit){
 }
 
 float getSensorVoltage(){
-//  float amplifiedSensorVoltage = (analogRead(A0)) * 1.1 / 1024.0;
-//  return (amplifiedSensorVoltage * 1000.0) / (4700.0 + 1000.0); 
   return (analogRead(A0)) * 1.1 / 1024.0;
 }
 
 float getTemperature(){
-//  float sensorVoltage = getSensorVoltage();
-//  float sensorResistance = (sensorVoltage * 4700.0) / (5.0 - sensorVoltage);
-//  return static_cast<int>((sensorResistance - 100.0) / 0.4); 
   float sensorResistance = (getSensorVoltage() * 1000.0) / (5.0 - getSensorVoltage());
-  return static_cast<int>((sensorResistance - 100.0) / 0.4);
+  return (sensorResistance - 100.0) / 0.4;
 }
 
-int getTempLimit(){
-  return static_cast<int>(analogRead(A1) * 255.0 / 1024.0);
+float getTempLimit(){
+  return analogRead(A1) * 255.0 / 1024.0;
 }
 
 void setAutoMode() {
