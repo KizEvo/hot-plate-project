@@ -10,7 +10,14 @@ volatile bool isUserPressedFinish {false};
 bool isRunning {false};
 bool isFinishedInitProgram {false};
 // LCD Instruction
-
+const byte LCD_COMMAND_CLEAR_DISPLAY = 0x01;
+const byte LCD_COMMAND_SET_FUNCTION_TWO_LINES = 0x38;
+const byte LCD_COMMAND_DISPLAY_ON = 0x0E;
+const byte LCD_COMMAND_ENTRY_MODE = 0x06;
+const byte LCD_COMMAND_SET_CURSOR_FIRST_LINE = 0x80;
+const byte LCD_COMMAND_SET_CURSOR_SECOND_LINE = 0xC0;
+const byte LCD_COMMAND_SET_CURSOR_MOVE_RIGHT = 0x14;
+const byte LCD_COMMAND_SET_CURSOR_MOVE_LEFT = 0x10;
 // Global vars
 int normPrevTempLimit;
 
@@ -35,9 +42,6 @@ class Timer
       prevCount = millis();
     }
 };
-
-Timer normModeTim;
-Timer autoModeTim;
 
 void writeLCD(char val, bool isWrite = false){
   char temp {val};
@@ -87,13 +91,13 @@ void writeIntLCD(int num){
 
 void moveCursorRightLCD(int line){
   for(byte i {0}; i < line; i++){
-    writeLCD(0x14);
+    writeLCD(LCD_COMMAND_SET_CURSOR_MOVE_RIGHT);
   }
 }
 
 void moveCursorLeftLCD(int line){
   for(byte i {0}; i < line; i++){
-    writeLCD(0x10);
+    writeLCD(LCD_COMMAND_SET_CURSOR_MOVE_LEFT);
   }
 }
 
@@ -106,35 +110,38 @@ void setEnablePin(){
 
 void initLCD(){
   delay(50);      // delay before start init sequence
-  writeLCD(0x01); // display clear
-  writeLCD(0x38); // function set - 8 bits - 2 lines
-  writeLCD(0x0E); // set entire display on, cursor on, blinking of cursor off
-  writeLCD(0x06); // entry mode - set cursor move direction
+  writeLCD(LCD_COMMAND_CLEAR_DISPLAY);
+  writeLCD(LCD_COMMAND_SET_FUNCTION_TWO_LINES);
+  writeLCD(LCD_COMMAND_DISPLAY_ON); // set entire display on, cursor on, blinking of cursor off
+  writeLCD(LCD_COMMAND_ENTRY_MODE); // entry mode - set cursor move direction
 }
 
 void initProgram(){
   moveCursorRightLCD(4);
   writeStringLCD("Loading");
-  writeLCD(0xC0);           // set cursor to second line
+  writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);           // set cursor to second line
   for(byte i {0}; i < 8; i++){
     writeLCD('#', true);
     delay(600 + i * 50);
   }
   
-  writeLCD(0x80);           // set cursor to first line
+  writeLCD(LCD_COMMAND_SET_CURSOR_FIRST_LINE);           // set cursor to first line
   writeStringLCD("Fetching Command");
-  writeLCD(0xC7);
+//  writeLCD(0xC7);
+  writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);
+  moveCursorRightLCD(8);
+//
   for(byte i {0}; i < 8; i++){
     writeLCD('#', true);
     delay(500 + i * 30);
   }
   
-  writeLCD(0x01);           // clear display
+  writeLCD(LCD_COMMAND_CLEAR_DISPLAY);           // clear display
   for(byte i {0}; i < 32; i++){
     if(i < 16) writeLCD('>', true);
     else {
       if(i == 16) {
-        writeLCD(0xC0);
+        writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);
         moveCursorRightLCD(15);
       }
       writeLCD('<', true);
@@ -143,19 +150,19 @@ void initProgram(){
     delay(40);
   }
   
-  writeLCD(0x01);           // clear display
+  writeLCD(LCD_COMMAND_CLEAR_DISPLAY);           // clear display
   moveCursorRightLCD(1);
   writeStringLCD("Access Granted");
-  writeLCD(0xC0);           // set cursor to second line
+  writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);           // set cursor to second line
   writeStringLCD("Welcome back Phu");
   delay(4000);
 
   // set state flag
   isFinishedInitProgram = true;
   
-  writeLCD(0x01);           // clear previous display
+  writeLCD(LCD_COMMAND_CLEAR_DISPLAY);           // clear previous display
   writeStringLCD("Select a mode:");
-  writeLCD(0xC0);
+  writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);
   writeStringLCD("Auto - Norm");
   // Waiting for user - mode selection (auto/normal)
   Timer initTim{5000};
@@ -163,21 +170,22 @@ void initProgram(){
     if(mode == 1) break;
   }
   
-  writeLCD(0x01);
+  writeLCD(LCD_COMMAND_CLEAR_DISPLAY);
   moveCursorRightLCD(3);
   writeStringLCD("Temp:");
-  writeLCD(0x8C);           // set cursor to address 0x0B - first line - 8 is prefix for "set DDRAM" instruction
+//  writeLCD(0x8C);           // set cursor to address 0x0B - first line - 8 is prefix for "set DDRAM" instruction
+  moveCursorRightLCD(4);
+//
   writeLCD(0xDF, true);     // special character * in kanji
   writeLCD('C', true);
 
   if(mode == 1){
-    writeLCD(0xC0);         // set cursor to second line
-    moveCursorRightLCD(1);
+    writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);
     writeStringLCD("Mode:Auto");
     moveCursorRightLCD(1);
     writeStringLCD("T:");
   } else {
-    writeLCD(0xC0);         // set cursor to second line
+    writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);
     writeStringLCD("Mode:Norm");
     moveCursorRightLCD(1);
     writeStringLCD("Mx:");
@@ -204,18 +212,22 @@ void setup() {
   // Set program operating state flags to true
   isRunning = true;
   // Testing - will be deleted
-  Serial.begin(9600);
+  Serial.begin(115200);
 }
 
 void loop() {
   if(mode == 1) doAutoMode();
   else doNormalMode();
+
+  while(isUserPressedFinish);
 }
 
 void doAutoMode(){
-  const byte MAX_TEMP_STAGES[3] {105, 165, 200};
+  const byte TOTAL_STAGES {3};
+  const byte MAX_TEMP_STAGES[TOTAL_STAGES] {62, 157, 186};
   byte currStage {0};
   bool stageFlag {true};
+  bool secondStageFlag {false};
   
   float temperature{};
   float tempSample{0};
@@ -223,6 +235,9 @@ void doAutoMode(){
 
   float prevHighestTemp{0};
   unsigned long timeRef = millis();
+
+  Timer transitionTim;
+  Timer secondStageTim;
 
   while(!isUserPressedFinish){
     temperature = getTemperature();
@@ -234,37 +249,59 @@ void doAutoMode(){
     totalSample = 0;
     tempSample = 0;
 
-    if(!stageFlag && prevHighestTemp - 1 > avgTemp && currStage < 3){
+    Serial.println(avgTemp);
+
+    if(!stageFlag && prevHighestTemp - 1 > avgTemp && currStage < TOTAL_STAGES){
       currStage++;
       stageFlag = true;
     }
 
-    if(avgTemp <= MAX_TEMP_STAGES[currStage] && stageFlag)
-      digitalWrite(SSR_PIN, HIGH);
-    else {
-      stageFlag = false;
+    if(avgTemp <= MAX_TEMP_STAGES[currStage] && stageFlag){
+      
+      if(currStage == 0 || currStage == 2) {
+        digitalWrite(SSR_PIN, HIGH);
+      } else if(currStage == 1) {
+        if(secondStageTim.checkFinished()){
+          if(secondStageFlag){
+            digitalWrite(SSR_PIN, HIGH);
+            secondStageFlag = false;
+            secondStageTim.setCounter(200);
+          } else {
+            digitalWrite(SSR_PIN, LOW);
+            secondStageFlag = true;
+            secondStageTim.setCounter(1000);
+          }
+        }
+      }
+      
+    } else {
+      if(transitionTim.checkFinished()){
+        stageFlag = false;
+        transitionTim.setCounter(2000);
+      }
       digitalWrite(SSR_PIN, LOW);
     }
 
     if(avgTemp > prevHighestTemp) prevHighestTemp = avgTemp;
-    
-    writeLCD(0x88);
+
+    writeLCD(LCD_COMMAND_SET_CURSOR_FIRST_LINE);
+    moveCursorRightLCD(8);
     writeIntLCD(static_cast<int>(avgTemp));
     if((avgTemp / 10) < 10) writeLCD(' ', true);
 
-    writeLCD(0xC0);
-    moveCursorRightLCD(13);
-    writeIntLCD(static_cast<int>((millis() - timeRef) / 1000));
-    if((static_cast<int>((millis() - timeRef) / 1000) / 10) < 10) writeLCD(' ', true);
+    writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);
+    moveCursorRightLCD(12);
+    int timeSecond = static_cast<int>((millis() - timeRef) / 1000);
+    timeSecond = timeSecond > 9999 ? 9999 : timeSecond;
+    writeIntLCD(timeSecond);
   }
 
-  writeLCD(0x01);           // clear display
+  writeLCD(LCD_COMMAND_CLEAR_DISPLAY);
   writeStringLCD("Program closed");
-  writeLCD(0xC0);
+  writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);
   writeStringLCD("See you again!");
   // turn off SSR
   digitalWrite(SSR_PIN, LOW);
-  while(1);
 }
 
 void doNormalMode(){
@@ -298,24 +335,24 @@ void doNormalMode(){
 
     normPrevTempLimit = static_cast<int>(avgTempLimit);
     
-    writeLCD(0x88);
+    writeLCD(LCD_COMMAND_SET_CURSOR_FIRST_LINE);
+    moveCursorRightLCD(8);
     writeIntLCD(static_cast<int>(avgTemp));
     if((avgTemp / 10) < 10) writeLCD(' ', true);
     
-    writeLCD(0xC0);
+    writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);
     moveCursorRightLCD(13);
     avgTempLimit = avgTempLimit < 1.0 ? 1.0 : avgTempLimit;
     writeIntLCD(static_cast<int>(avgTempLimit));
     if((avgTempLimit / 10) < 10) writeLCD(' ', true);
   }
 
-  writeLCD(0x01);           // clear display
+  writeLCD(LCD_COMMAND_CLEAR_DISPLAY);           // clear display
   writeStringLCD("Program closed");
-  writeLCD(0xC0);
+  writeLCD(LCD_COMMAND_SET_CURSOR_SECOND_LINE);
   writeStringLCD("See you again!");
   // turn off SSR
   digitalWrite(SSR_PIN, LOW);
-  while(1);
 }
 
 
