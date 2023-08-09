@@ -10,8 +10,8 @@ and I needed a method to let me control the temperature.
 
 My choice for temperature sensor is a PT-100 RTD (Resistance Temperature Detector) which have high accuracy and can measure very high temperature.
 With that I can move on to the next component which is a LCD 16x2 (HD47780 Driver) to display the temperature measured by the sensor.
-The heart of the project is the heating element, at first I was thinking of disassemble an electric iron but I went for thermoelectric materials instead.
-If you apply electric current to these materials it will create a temperature difference. Lastly, to control the temperature I used an Arduino Nano as the brain for 
+The heart of the project is the heating element, at first I was thinking of disassemble an electric iron but I went for PTC materials instead. It is an electrical
+resistance heater whose resistance increases significantly with temperature. Lastly, to control the temperature I used an Arduino Nano as the brain for 
 this project and a solid-state relay to turn on/off the hot plate.
 
 <br />
