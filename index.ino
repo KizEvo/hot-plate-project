@@ -224,7 +224,7 @@ void loop() {
 
 void doAutoMode(){
   const byte TOTAL_STAGES {3};
-  const byte MAX_TEMP_STAGES[TOTAL_STAGES] {62, 157, 186};
+  const byte MAX_TEMP_STAGES[TOTAL_STAGES] {62, 157, 210};
   byte currStage {0};
   bool stageFlag {true};
   bool secondStageFlag {false};
@@ -323,6 +323,10 @@ void doNormalMode(){
 
     float avgTemp = sqrt(tempSample / totalSample);
     float avgTempLimit = sqrt(tempSampleLim / totalSample);
+
+    // Temperature limit multiplier
+    // To increase the maximum temperature limit to 250
+    avgTempLimit *= 1.25;
     
     totalSample = 0;
     tempSample = 0;
@@ -374,7 +378,8 @@ float getSensorVoltage(){
 }
 
 float getTemperature(){
-  float sensorResistance = (getSensorVoltage() * 1000.0) / (5.0 - getSensorVoltage());
+  float errorOffsetResistance = 5.027;
+  float sensorResistance = (getSensorVoltage() * 1000.0) / (5.0 - getSensorVoltage()) - errorOffsetResistance;
   return (sensorResistance - 100.0) / 0.4;
 }
 
